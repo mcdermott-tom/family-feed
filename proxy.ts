@@ -23,8 +23,17 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  // This is the "Heartbeat" that keeps your session alive
-  await supabase.auth.getUser()
+  // 1. Refresh session
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // 2. RATIONAL HEARTBEAT: Update the family activity log if the owner is active
+  // This is the data source for the 90-day inactivity check.
+  if (user) {
+    await supabase
+      .from('families')
+      .update({ last_activity_at: new Date().toISOString() })
+      .eq('owner_id', user.id)
+  }
 
   return response
 }
