@@ -30,27 +30,55 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ j
     );
   }
 
-  const [profileResponse, ownedResponse] = await Promise.all([
-    supabase.from('profiles').select('*, families(*)').eq('id', user.id).single(),
-    supabase.from('families').select('*').eq('owner_id', user.id).limit(1)
-  ]);
+  // 1. Fetch Profile alone first
+  const { data: profileData } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single();
 
-  const activeFamily = profileResponse.data?.families || ownedResponse.data?.[0];
+  // 2. Determine the Family ID to look for
+  const targetFamilyId = profileData?.family_id;
 
+  // 3. Fetch Family alone
+  let activeFamily = null;
+  if (targetFamilyId) {
+    const { data: familyRecord } = await supabase
+      .from('families')
+      .select('*')
+      .eq('id', targetFamilyId)
+      .single();
+    activeFamily = familyRecord;
+  }
+
+  // 4. OWNER FALLBACK: In case they created a family but profile.family_id isn't set yet
+  if (!activeFamily) {
+    const { data: ownedFamily } = await supabase
+      .from('families')
+      .select('*')
+      .eq('owner_id', user.id)
+      .maybeSingle();
+    activeFamily = ownedFamily;
+  }
+
+  // RATIONAL: If we found a family, ensure the profile is linked for future requests.
+  if (activeFamily && profileData && !profileData.family_id) {
+    await supabase.from('profiles').update({ family_id: activeFamily.id }).eq('id', user.id);
+  }
+
+  // THE TRAP: If after all that we have no family, onboarding is the only path.
   if (!activeFamily) {
     return <Onboarding userId={user.id} />;
   }
 
-  // RATIONAL: Adding a hard-coded fallback for the avatar URL.
-  // This ensures the image tag always has a valid 'src'.
-  const displayName = profileResponse.data?.display_name || user.user_metadata.full_name || 'Folk Member';
-  const rawAvatar = profileResponse.data?.avatar_url || user.user_metadata.avatar_url;
+  const displayName = profileData?.display_name || user.user_metadata?.full_name || 'Folk Member';
+  const rawAvatar = profileData?.avatar_url || user.user_metadata?.avatar_url;
   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random&color=fff`;
 
   const profile = {
     id: user.id,
     display_name: displayName,
-    avatar_url: rawAvatar || fallbackAvatar,
+    avatar_url: (rawAvatar && rawAvatar.startsWith('http')) ? rawAvatar : fallbackAvatar,
     family_id: activeFamily.id
   };
 

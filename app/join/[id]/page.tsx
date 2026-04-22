@@ -1,34 +1,54 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { LoginButton } from '@/components/LoginButton';
 
-export default async function JoinFamily({ params }: { params: { id: string } }) {
+export default async function JoinFamily({ params }: { params: Promise<{ id: string }> }) {
+  const { id: familyId } = await params;
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { get(name: string) { return cookieStore.get(name)?.value } } }
+    { cookies: { getAll() { return cookieStore.getAll() } } }
   );
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  // If not logged in, send to home (which shows the login button)
-  // We'll pass the join ID in the URL so they come back here after auth
-  if (!session) {
-    redirect(`/?join=${params.id}`);
+  // 1. UNAUTHENTICATED: Keep the user on this page to maintain the join context.
+  if (!user) {
+    const { data: family } = await supabase.from('families').select('name').eq('id', familyId).single();
+    
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-950">
+        <div className="text-center space-y-6">
+          <h1 className="text-4xl font-black uppercase italic tracking-tighter">You're Invited</h1>
+          <p className="text-zinc-500 font-medium italic">
+            Join the <span className="text-black dark:text-white font-bold">{family?.name || 'Family'}</span> archive.
+          </p>
+          <div className="flex justify-center">
+            <LoginButton joinId={familyId} />
+          </div>
+        </div>
+      </main>
+    );
   }
 
-  // Link the user to this specific family
+  // 2. AUTHENTICATED HANDSHAKE: Ensure the profile exists and is linked.
+  // RATIONAL: .upsert handles the case where the user doesn't have a profile row yet.
   const { error } = await supabase
     .from('profiles')
-    .update({ family_id: params.id })
-    .eq('id', session.user.id);
+    .upsert({ 
+      id: user.id, 
+      family_id: familyId,
+      display_name: user.user_metadata?.full_name || 'Folk Member',
+      avatar_url: user.user_metadata?.avatar_url || ''
+    });
 
   if (error) {
-    console.error("Join failed:", error);
-    return <div>Invite link is invalid or expired.</div>;
+    console.error("Handshake failed:", error.message);
+    return <div className="p-10 text-red-500">Could not link to family: {error.message}</div>;
   }
 
-  // Success: Send them to the feed
+  // 3. REDIRECT: Once the DB row is written, go to the feed.
   redirect('/');
 }
