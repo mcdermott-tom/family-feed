@@ -75,9 +75,13 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
   const rootComments = comments.filter(c => !c.parent_id);
   const getReplies = (parentId: string) => comments.filter(c => c.parent_id === parentId);
 
+  const likerNames = post.likes?.map((l: any) => l.profiles?.display_name).filter(Boolean) || [];
+  const likeDisplay = likerNames.length > 3 
+    ? `${likerNames.slice(0, 2).join(', ')} and ${likerNames.length - 2} others`
+    : likerNames.join(', ');
+
   return (
     <div className={`border-b border-zinc-100 dark:border-zinc-800 p-5 bg-white dark:bg-black text-black dark:text-white ${post.id.startsWith('temp-') ? 'opacity-60' : 'opacity-100'}`}>
-      {/* Post Header & Content */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <img src={getAvatar(post.profiles)} className="w-10 h-10 rounded-full object-cover border border-zinc-100 dark:border-zinc-800" alt="" />
@@ -105,16 +109,19 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
         </div>
       )}
 
-      {/* Post Actions */}
-      <div className="flex items-center gap-6 mt-4">
-        <LikeButton postId={post.id} initialLiked={isLikedByMe} initialCount={post.likes?.[0]?.count || 0} userId={userId} />
-        <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-zinc-500 hover:text-black dark:hover:text-white transition-colors">
-          <MessageCircle size={20} />
-          <span className="text-sm font-bold tabular-nums">{comments.length}</span>
-        </button>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-6">
+          <LikeButton postId={post.id} initialLiked={isLikedByMe} initialCount={likerNames.length} userId={userId} />
+          <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-zinc-500 hover:text-black dark:hover:text-white transition-colors">
+            <MessageCircle size={20} />
+            <span className="text-sm font-bold tabular-nums">{comments.length}</span>
+          </button>
+        </div>
+        {likerNames.length > 0 && (
+          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tight px-2">Liked by {likeDisplay}</p>
+        )}
       </div>
 
-      {/* Threaded Comments Section */}
       {showComments && (
         <div className="mt-6 space-y-6 pt-4 border-t border-zinc-50 dark:border-zinc-900">
           {rootComments.map((c: any) => {
@@ -124,7 +131,6 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
 
             return (
               <div key={c.id} className="space-y-4">
-                {/* Parent Comment */}
                 <div className="flex gap-3 justify-between group items-start">
                   <div className="flex gap-3">
                     <img src={getAvatar(c.profiles)} className="w-6 h-6 rounded-full object-cover" alt="" />
@@ -148,14 +154,11 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
                   </button>
                 </div>
 
-                {/* Replies Container */}
                 {replies.length > 0 && (
                   <div className="ml-8 space-y-3 border-l-2 border-zinc-50 dark:border-zinc-900 pl-4">
                     {replies.map((reply: any) => {
-                        // RATIONAL: Apply the same scoping logic for reply-specific likes.
                         const replyLikedByMe = reply.user_like?.some((l: any) => l.user_id === userId);
                         const replyLikeCount = reply.comment_likes?.[0]?.count || 0;
-
                         return (
                             <div key={reply.id} className="flex gap-3 justify-between items-start opacity-80 group/reply">
                                 <div className="flex gap-2">
@@ -166,7 +169,6 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
                                         <p className="text-xs text-zinc-800 dark:text-zinc-200">{reply.content}</p>
                                     </div>
                                 </div>
-                                {/* RATIONAL: Mini-like button for replies. Slightly ghosted until hovered. */}
                                 <button 
                                     onClick={() => handleToggleCommentLike(reply.id, !!replyLikedByMe)}
                                     className={`flex items-center gap-1 p-1 transition-all active:scale-125 ${replyLikedByMe ? 'text-red-500' : 'text-zinc-200 group-hover/reply:text-zinc-400'}`}
@@ -205,7 +207,7 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
                       }
                     }}
                     placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
-                    className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 p-2 px-4 rounded-xl text-sm outline-none focus:ring-1 ring-blue-500 text-black dark:text-white"
+                    className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 p-2 px-4 rounded-xl text-sm outline-none focus:ring-1 ring-blue-500 text-black dark:text-white font-medium"
                 />
                 <button type="submit" disabled={!commentText.trim()} className="text-blue-500 disabled:opacity-20 active:scale-90 p-2">
                     <Send size={18} />
