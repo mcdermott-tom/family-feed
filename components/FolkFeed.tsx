@@ -7,7 +7,7 @@ import { UploadModal } from './UploadModal';
 export function FolkFeed({ familyId, profile }: { familyId: string, profile: any }) {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [availableDates, setAvailableDates] = useState<any[]>([]);
+  const [availableDates, setAvailableDates] = useState<Date[]>([]);
   
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
@@ -15,9 +15,7 @@ export function FolkFeed({ familyId, profile }: { familyId: string, profile: any
 
   const monthsLabel = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  // 1. DATA INDEXING: Fetch all timestamps once to build the UI
-  // RATIONAL: Fetching only the 'created_at' column is a tiny payload that 
-  // allows us to prune the UI without expensive aggregate queries.
+  // 1. DATA INDEXING: Build the Map of existing data
   const fetchDateMap = useCallback(async () => {
     const { data } = await supabase
       .from('posts')
@@ -27,9 +25,9 @@ export function FolkFeed({ familyId, profile }: { familyId: string, profile: any
     if (data) setAvailableDates(data.map(p => new Date(p.created_at)));
   }, [familyId]);
 
-  // 2. UI PRUNING LOGIC
+  // 2. DYNAMIC PRUNING LOGIC: Only show bubbles that have posts
   const dateStructure = useMemo(() => {
-    const map: any = {};
+    const map: Record<number, Record<number, Set<number>>> = {};
     availableDates.forEach(date => {
       const y = date.getFullYear();
       const m = date.getMonth();
@@ -50,7 +48,7 @@ export function FolkFeed({ familyId, profile }: { familyId: string, profile: any
   
   const activeDays = useMemo(() => 
     (selectedYear && selectedMonth !== null && dateStructure[selectedYear]?.[selectedMonth])
-      ? Array.from(dateStructure[selectedYear][selectedMonth] as Set<number>).sort((a, b) => a - b)
+      ? Array.from(dateStructure[selectedYear][selectedMonth]).sort((a, b) => a - b)
       : [],
   [dateStructure, selectedYear, selectedMonth]);
 
@@ -63,12 +61,15 @@ export function FolkFeed({ familyId, profile }: { familyId: string, profile: any
     if (selectedYear) {
       let start, end;
       if (selectedMonth !== null && selectedDay !== null) {
+        // Precise Day
         start = new Date(selectedYear, selectedMonth, selectedDay, 0, 0, 0).toISOString();
         end = new Date(selectedYear, selectedMonth, selectedDay, 23, 59, 59).toISOString();
       } else if (selectedMonth !== null) {
+        // Whole Month
         start = new Date(selectedYear, selectedMonth, 1, 0, 0, 0).toISOString();
         end = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59).toISOString();
       } else {
+        // Whole Year
         start = new Date(selectedYear, 0, 1, 0, 0, 0).toISOString();
         end = new Date(selectedYear, 11, 31, 23, 59, 59).toISOString();
       }
@@ -88,42 +89,78 @@ export function FolkFeed({ familyId, profile }: { familyId: string, profile: any
         fetchDateMap();
         fetchPosts();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, () => fetchPosts())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [familyId, fetchPosts, fetchDateMap]);
 
-  if (loading && posts.length === 0) return <div className="p-10 text-center animate-pulse uppercase text-[10px] font-black">Gathering...</div>;
+  if (loading && posts.length === 0) return (
+    <div className="p-10 text-center animate-pulse uppercase text-[10px] font-black tracking-widest text-zinc-400">
+      Gathering the archive...
+    </div>
+  );
 
   return (
     <div className="flex flex-col">
-      <div className="sticky top-[73px] z-20 bg-white/90 dark:bg-black/90 backdrop-blur-md border-b border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
+      {/* THE ARCHIVE JUMP */}
+      <div className="sticky top-[73px] z-20 bg-white/95 dark:bg-black/95 backdrop-blur-md border-b border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
         {/* Years */}
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {activeYears.map(year => (
-            <button key={year} onClick={() => { setSelectedYear(selectedYear === year ? null : year); setSelectedMonth(null); setSelectedDay(null); }} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${selectedYear === year ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400'}`}>{year}</button>
+            <button 
+              key={year} 
+              onClick={() => { setSelectedYear(selectedYear === year ? null : year); setSelectedMonth(null); setSelectedDay(null); }} 
+              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${selectedYear === year ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg scale-105' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400'}`}
+            >
+              {year}
+            </button>
           ))}
         </div>
         {/* Months */}
-        {activeMonths.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto no-scrollbar animate-in slide-in-from-top-2">
+        {selectedYear && activeMonths.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto no-scrollbar animate-in slide-in-from-top-2 duration-200">
             {activeMonths.map(mIdx => (
-              <button key={mIdx} onClick={() => { setSelectedMonth(selectedMonth === mIdx ? null : mIdx); setSelectedDay(null); }} className={`flex-shrink-0 px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${selectedMonth === mIdx ? 'bg-blue-500 text-white' : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400'}`}>{monthsLabel[mIdx]}</button>
+              <button 
+                key={mIdx} 
+                onClick={() => { setSelectedMonth(selectedMonth === mIdx ? null : mIdx); setSelectedDay(null); }} 
+                className={`flex-shrink-0 px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider transition-all ${selectedMonth === mIdx ? 'bg-blue-500 text-white' : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400'}`}
+              >
+                {monthsLabel[mIdx]}
+              </button>
             ))}
           </div>
         )}
         {/* Days */}
-        {activeDays.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto no-scrollbar animate-in slide-in-from-top-4">
+        {selectedMonth !== null && activeDays.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto no-scrollbar animate-in slide-in-from-top-4 duration-300">
             {activeDays.map(day => (
-              <button key={day} onClick={() => setSelectedDay(selectedDay === day ? null : day)} className={`flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-[10px] font-bold ${selectedDay === day ? 'bg-zinc-800 dark:bg-zinc-200 text-white dark:text-black' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-400 border border-zinc-100 dark:border-zinc-800'}`}>{day}</button>
+              <button 
+                key={day} 
+                onClick={() => setSelectedDay(selectedDay === day ? null : day)} 
+                className={`flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-[10px] font-bold transition-all ${selectedDay === day ? 'bg-zinc-800 dark:bg-zinc-200 text-white dark:text-black scale-110' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-400 border border-zinc-100 dark:border-zinc-800'}`}
+              >
+                {day}
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      <UploadModal familyId={familyId} profile={profile} addOptimistic={(p:any) => setPosts(c => [p, ...c])} onSuccess={fetchPosts} />
+      <UploadModal 
+        familyId={familyId} 
+        profile={profile} 
+        addOptimistic={(p:any) => setPosts(c => [p, ...c])} 
+        onSuccess={fetchPosts} 
+      />
+
       <div className="flex flex-col">
-        {posts.map(post => <PostCard key={post.id} post={post} userId={profile.id} />)}
+        {posts.length > 0 ? (
+          posts.map(post => <PostCard key={post.id} post={post} userId={profile.id} />)
+        ) : (
+          <div className="p-20 text-center text-zinc-400 text-sm italic font-medium">
+            No memories found for this period.
+          </div>
+        )}
       </div>
     </div>
   );

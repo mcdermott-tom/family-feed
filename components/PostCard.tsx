@@ -19,13 +19,7 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
       .eq('post_id', post.id);
     
     if (data) {
-      const sorted = data.sort((a: any, b: any) => {
-        const aCount = a.comment_likes?.[0]?.count || 0;
-        const bCount = b.comment_likes?.[0]?.count || 0;
-        if (bCount !== aCount) return bCount - aCount;
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      });
-      setComments(sorted);
+      setComments(data);
     }
   }, [post.id]);
 
@@ -52,19 +46,10 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
   const handleAddComment = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!commentText.trim() || !userId) return;
-    
     const { error } = await supabase.from('comments').insert({
-      post_id: post.id,
-      user_id: userId,
-      content: commentText.trim(),
-      parent_id: replyingTo 
+      post_id: post.id, user_id: userId, content: commentText.trim(), parent_id: replyingTo 
     });
-
-    if (!error) {
-      setCommentText("");
-      setReplyingTo(null);
-      fetchComments(); 
-    }
+    if (!error) { setCommentText(""); setReplyingTo(null); fetchComments(); }
   };
 
   const getAvatar = (profile: any) => {
@@ -72,8 +57,18 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
   };
 
   const isLikedByMe = post.user_like?.some((l: any) => l.user_id === userId);
-  const rootComments = comments.filter(c => !c.parent_id);
-  const getReplies = (parentId: string) => comments.filter(c => c.parent_id === parentId);
+
+  // RATIONAL SORTING: 
+  // 1. Root comments by most likes.
+  // 2. Replies by chronological order (oldest first).
+  const rootComments = comments
+    .filter(c => !c.parent_id)
+    .sort((a, b) => (b.comment_likes?.[0]?.count || 0) - (a.comment_likes?.[0]?.count || 0));
+
+  const getReplies = (parentId: string) => 
+    comments
+      .filter(c => c.parent_id === parentId)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
   const likerNames = post.likes?.map((l: any) => l.profiles?.display_name).filter(Boolean) || [];
   const likeDisplay = likerNames.length > 3 
@@ -93,9 +88,7 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
           </div>
         </div>
         {userId === post.user_id && !post.id.startsWith('temp-') && (
-          <button onClick={() => supabase.from('posts').delete().eq('id', post.id)} className="text-zinc-300 hover:text-red-500 transition-colors p-2">
-            <Trash2 size={18} />
-          </button>
+          <button onClick={() => supabase.from('posts').delete().eq('id', post.id)} className="text-zinc-300 hover:text-red-500 transition-colors p-2"><Trash2 size={18} /></button>
         )}
       </div>
 
@@ -113,8 +106,7 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
         <div className="flex items-center gap-6">
           <LikeButton postId={post.id} initialLiked={isLikedByMe} initialCount={likerNames.length} userId={userId} />
           <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-zinc-500 hover:text-black dark:hover:text-white transition-colors">
-            <MessageCircle size={20} />
-            <span className="text-sm font-bold tabular-nums">{comments.length}</span>
+            <MessageCircle size={20} /><span className="text-sm font-bold tabular-nums">{comments.length}</span>
           </button>
         </div>
         {likerNames.length > 0 && (
@@ -128,7 +120,6 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
             const hasLikedByMe = c.user_like?.some((l: any) => l.user_id === userId);
             const likeCount = c.comment_likes?.[0]?.count || 0;
             const replies = getReplies(c.id);
-
             return (
               <div key={c.id} className="space-y-4">
                 <div className="flex gap-3 justify-between group items-start">
@@ -137,81 +128,50 @@ export function PostCard({ post, userId }: { post: any, userId: string | null })
                     <div className="flex flex-col">
                       <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-tighter">{c.profiles?.display_name}</span>
                       <p className="text-sm text-zinc-800 dark:text-zinc-200">{c.content}</p>
-                      <button 
-                        onClick={() => { setReplyingTo(c.id); setCommentText(`@${c.profiles?.display_name.split(' ')[0]} `); }}
-                        className="text-[10px] font-black text-blue-500 uppercase mt-1 text-left hover:underline"
-                      >
-                        Reply
-                      </button>
+                      <button onClick={() => { setReplyingTo(c.id); setCommentText(`@${c.profiles?.display_name.split(' ')[0]} `); }} className="text-[10px] font-black text-blue-500 uppercase mt-1 text-left hover:underline">Reply</button>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => handleToggleCommentLike(c.id, !!hasLikedByMe)}
-                    className={`flex items-center gap-1 p-1 transition-all active:scale-125 ${hasLikedByMe ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-400'}`}
-                  >
+                  <button onClick={() => handleToggleCommentLike(c.id, !!hasLikedByMe)} className={`flex items-center gap-1 p-1 transition-all active:scale-125 ${hasLikedByMe ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-400'}`}>
                     <span className="text-[10px] font-black tabular-nums">{likeCount > 0 ? likeCount : ''}</span>
                     <Heart size={12} className={hasLikedByMe ? 'fill-current' : ''} />
                   </button>
                 </div>
-
-                {replies.length > 0 && (
-                  <div className="ml-8 space-y-3 border-l-2 border-zinc-50 dark:border-zinc-900 pl-4">
-                    {replies.map((reply: any) => {
-                        const replyLikedByMe = reply.user_like?.some((l: any) => l.user_id === userId);
-                        const replyLikeCount = reply.comment_likes?.[0]?.count || 0;
-                        return (
-                            <div key={reply.id} className="flex gap-3 justify-between items-start opacity-80 group/reply">
-                                <div className="flex gap-2">
-                                    <CornerDownRight size={14} className="text-zinc-300 mt-1" />
-                                    <img src={getAvatar(reply.profiles)} className="w-5 h-5 rounded-full object-cover" alt="" />
-                                    <div className="flex flex-col">
-                                        <span className="text-[10px] font-bold text-zinc-500 uppercase">{reply.profiles?.display_name}</span>
-                                        <p className="text-xs text-zinc-800 dark:text-zinc-200">{reply.content}</p>
-                                    </div>
-                                </div>
-                                <button 
-                                    onClick={() => handleToggleCommentLike(reply.id, !!replyLikedByMe)}
-                                    className={`flex items-center gap-1 p-1 transition-all active:scale-125 ${replyLikedByMe ? 'text-red-500' : 'text-zinc-200 group-hover/reply:text-zinc-400'}`}
-                                >
-                                    <span className="text-[9px] font-black tabular-nums">{replyLikeCount > 0 ? replyLikeCount : ''}</span>
-                                    <Heart size={10} className={replyLikedByMe ? 'fill-current' : ''} />
-                                </button>
-                            </div>
-                        );
-                    })}
-                  </div>
-                )}
+                {replies.map((reply: any) => {
+                  const replyLikedByMe = reply.user_like?.some((l: any) => l.user_id === userId);
+                  const replyLikeCount = reply.comment_likes?.[0]?.count || 0;
+                  return (
+                    <div key={reply.id} className="ml-8 flex gap-3 justify-between items-start opacity-80 group/reply">
+                      <div className="flex gap-2">
+                        <CornerDownRight size={14} className="text-zinc-300 mt-1" />
+                        <img src={getAvatar(reply.profiles)} className="w-5 h-5 rounded-full object-cover" alt="" />
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase">{reply.profiles?.display_name}</span>
+                          <p className="text-xs text-zinc-800 dark:text-zinc-200">{reply.content}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleToggleCommentLike(reply.id, !!replyLikedByMe)}
+                        className={`flex items-center gap-1 p-1 transition-all active:scale-125 ${replyLikedByMe ? 'text-red-500' : 'text-zinc-200 group-hover/reply:text-zinc-400'}`}
+                      >
+                        <span className="text-[9px] font-black tabular-nums">{replyLikeCount > 0 ? replyLikeCount : ''}</span>
+                        <Heart size={10} className={replyLikedByMe ? 'fill-current' : ''} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
-          
           <form onSubmit={handleAddComment} className="flex flex-col gap-2 mt-2">
             {replyingTo && (
-                <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/10 px-3 py-1 rounded-lg">
-                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase">Replying to thread...</span>
-                    <button onClick={() => { setReplyingTo(null); setCommentText(""); }} className="text-zinc-400"><X size={12} /></button>
-                </div>
+              <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/10 px-3 py-1 rounded-lg">
+                <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase">Replying to thread...</span>
+                <button onClick={() => { setReplyingTo(null); setCommentText(""); }} className="text-zinc-400"><X size={12} /></button>
+              </div>
             )}
             <div className="flex items-center gap-2">
-                <input 
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (e.metaKey || e.ctrlKey) {
-                          e.preventDefault();
-                          handleAddComment();
-                        } else {
-                          e.preventDefault(); 
-                        }
-                      }
-                    }}
-                    placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
-                    className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 p-2 px-4 rounded-xl text-sm outline-none focus:ring-1 ring-blue-500 text-black dark:text-white font-medium"
-                />
-                <button type="submit" disabled={!commentText.trim()} className="text-blue-500 disabled:opacity-20 active:scale-90 p-2">
-                    <Send size={18} />
-                </button>
+              <input value={commentText} onChange={(e) => setCommentText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { if (e.metaKey || e.ctrlKey) { e.preventDefault(); handleAddComment(); } else { e.preventDefault(); } } }} placeholder={replyingTo ? "Write a reply..." : "Add a comment..."} className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 p-2 px-4 rounded-xl text-sm outline-none focus:ring-1 ring-blue-500 text-black dark:text-white font-medium" />
+              <button type="submit" disabled={!commentText.trim()} className="text-blue-500 disabled:opacity-20 active:scale-90 p-2"><Send size={18} /></button>
             </div>
           </form>
         </div>
